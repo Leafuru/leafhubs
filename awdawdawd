@@ -1368,7 +1368,7 @@ local function getObjGen()
             Gui.Logo.Name = "Logo"
             Gui.Logo.Parent = Gui.Cheats_2
             Gui.Logo.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-            Gui.Logo.BackgroundTransparency = 0
+            Gui.Logo.BackgroundTransparency = 1.000
             Gui.Logo.LayoutOrder = -5
             Gui.Logo.Size = UDim2.new(1, 0, 0.100000001, 0)
             Gui.Logo.ZIndex = 122
