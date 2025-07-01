@@ -1,0 +1,523 @@
+-- ESP System for Leaf Hub Rewrite
+-- This should be loaded as a separate loadstring module
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+
+-- ESP Module
+local ESPModule = {}
+
+-- ESP Settings
+local ESP = {
+    Enabled = false,
+    Settings = {
+        ShowBoxes = true,
+        ShowNames = true,
+        ShowHealth = true,
+        ShowDistance = true,
+        ShowLevel = true,
+        MaxDistance = 2000,
+        TeamCheck = false,
+        PlayerColor = Color3.fromRGB(255, 0, 0),
+        BoxWidth = 4,
+        BoxHeight = 6
+    }
+}
+
+-- Keep track of all ESP objects
+local ESPObjects = {}
+
+-- Create ESP object for a player
+local function CreateESPObject(player)
+    if not player or player == LocalPlayer then return end
+    
+    local espObject = {
+        Player = player,
+        Drawings = {
+            Box = Drawing.new("Square"),
+            Name = Drawing.new("Text"),
+            Health = Drawing.new("Text"),
+            HealthBar = Drawing.new("Line"),
+            HealthBarBackground = Drawing.new("Line"),
+            Distance = Drawing.new("Text"),
+            Level = Drawing.new("Text")
+        }
+    }
+    
+    -- Configure drawing objects
+    espObject.Drawings.Box.Thickness = 1
+    espObject.Drawings.Box.Filled = false
+    espObject.Drawings.Box.Color = ESP.Settings.PlayerColor
+    espObject.Drawings.Box.Visible = false
+    
+    espObject.Drawings.Name.Size = 16
+    espObject.Drawings.Name.Center = true
+    espObject.Drawings.Name.Outline = true
+    espObject.Drawings.Name.Color = ESP.Settings.PlayerColor
+    espObject.Drawings.Name.Visible = false
+    
+    espObject.Drawings.Health.Size = 14
+    espObject.Drawings.Health.Center = true
+    espObject.Drawings.Health.Outline = true
+    espObject.Drawings.Health.Color = ESP.Settings.PlayerColor
+    espObject.Drawings.Health.Visible = false
+    
+    -- Health bar settings
+    espObject.Drawings.HealthBarBackground.Thickness = 3
+    espObject.Drawings.HealthBarBackground.Color = Color3.fromRGB(0, 0, 0)
+    espObject.Drawings.HealthBarBackground.Visible = false
+    
+    espObject.Drawings.HealthBar.Thickness = 1.5
+    espObject.Drawings.HealthBar.Color = Color3.fromRGB(0, 255, 0)
+    espObject.Drawings.HealthBar.Visible = false
+    
+    espObject.Drawings.Distance.Size = 14
+    espObject.Drawings.Distance.Center = true
+    espObject.Drawings.Distance.Outline = true
+    espObject.Drawings.Distance.Color = ESP.Settings.PlayerColor
+    espObject.Drawings.Distance.Visible = false
+    
+    espObject.Drawings.Level.Size = 14
+    espObject.Drawings.Level.Center = true
+    espObject.Drawings.Level.Outline = true
+    espObject.Drawings.Level.Color = ESP.Settings.PlayerColor
+    espObject.Drawings.Level.Visible = false
+    
+    ESPObjects[player] = espObject
+    return espObject
+end
+
+-- Remove ESP object when player leaves
+local function RemoveESPObject(player)
+    local espObject = ESPObjects[player]
+    if not espObject then return end
+    
+    for _, drawing in pairs(espObject.Drawings) do
+        pcall(function()
+            if drawing and drawing.Remove then
+                drawing:Remove()
+            end
+        end)
+    end
+    
+    ESPObjects[player] = nil
+end
+
+-- Get player level
+local function getPlayerLevel(character)
+    if not character then return 0 end
+    
+    local success, attributes = pcall(function() return character:GetAttributes() end)
+    if not success or not attributes then return 0 end
+    
+    local count = 0
+    for i, v in next, attributes do
+        if string.match(i, 'Stat_') then count = count + v end
+    end
+    
+    return math.clamp(math.floor(count / 315 * 20), 1, 20)
+end
+
+-- Update ESP for a player
+local function UpdateESP(player)
+    if not player or not player.Parent then return end
+    
+    local espObject = ESPObjects[player]
+    if not espObject then return end
+    
+    -- Check if ESP is enabled
+    if not ESP.Enabled then
+        for _, drawing in pairs(espObject.Drawings) do
+            drawing.Visible = false
+        end
+        return
+    end
+    
+    -- Check if player's character exists
+    local character
+    local success = pcall(function() character = player.Character end)
+    
+    if not success or not character then
+        for _, drawing in pairs(espObject.Drawings) do
+            drawing.Visible = false
+        end
+        return
+    end
+    
+    -- Find required parts
+    local rootPart, humanoid
+    success = pcall(function()
+        rootPart = character:FindFirstChild("HumanoidRootPart")
+        humanoid = character:FindFirstChildOfClass("Humanoid")
+    end)
+    
+    if not success or not rootPart or not humanoid then
+        for _, drawing in pairs(espObject.Drawings) do
+            drawing.Visible = false
+        end
+        return
+    end
+    
+    -- Check team if team check is enabled
+    if ESP.Settings.TeamCheck then
+        local myGuild = ""
+        local playerGuild = ""
+        
+        pcall(function() myGuild = LocalPlayer:GetAttribute("Guild") or "" end)
+        pcall(function() playerGuild = player:GetAttribute("Guild") or "" end)
+        
+        if myGuild ~= "" and myGuild == playerGuild then
+            for _, drawing in pairs(espObject.Drawings) do
+                drawing.Visible = false
+            end
+            return
+        end
+    end
+    
+    -- Get data for ESP
+    local position = rootPart.Position
+    local camera = workspace.CurrentCamera
+    local myRootPart
+    
+    success = pcall(function()
+        myRootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    end)
+    
+    if not success or not myRootPart then
+        for _, drawing in pairs(espObject.Drawings) do
+            drawing.Visible = false
+        end
+        return
+    end
+    
+    -- Calculate distance
+    local distance = (myRootPart.Position - position).Magnitude
+    
+    -- Check if player is within max distance
+    if distance > ESP.Settings.MaxDistance then
+        for _, drawing in pairs(espObject.Drawings) do
+            drawing.Visible = false
+        end
+        return
+    end
+    
+    -- Calculate screen position
+    local screenPosition, onScreen
+    success = pcall(function()
+        screenPosition, onScreen = camera:WorldToViewportPoint(position)
+    end)
+    
+    if not success or not onScreen then
+        for _, drawing in pairs(espObject.Drawings) do
+            drawing.Visible = false
+        end
+        return
+    end
+    
+    -- Calculate box size based on distance
+    local sizeFactor = math.clamp(1000 / distance, 0.5, 3)
+    local width = ESP.Settings.BoxWidth * sizeFactor * 10
+    local height = ESP.Settings.BoxHeight * sizeFactor * 10
+    
+    -- Box position (centered on screen position)
+    local boxX = screenPosition.X - width/2
+    local boxY = screenPosition.Y - height/2
+    
+    -- Update box
+    espObject.Drawings.Box.Size = Vector2.new(width, height)
+    espObject.Drawings.Box.Position = Vector2.new(boxX, boxY)
+    espObject.Drawings.Box.Visible = ESP.Settings.ShowBoxes
+    espObject.Drawings.Box.Color = ESP.Settings.PlayerColor
+    
+    -- Update name - position above the box
+    local displayName = ""
+    pcall(function() displayName = player:GetAttribute("CharacterName") or player.Name end)
+    
+    espObject.Drawings.Name.Text = displayName
+    espObject.Drawings.Name.Position = Vector2.new(screenPosition.X, boxY - 20)
+    espObject.Drawings.Name.Visible = ESP.Settings.ShowNames
+    espObject.Drawings.Name.Color = ESP.Settings.PlayerColor
+    
+    -- Update health
+    local health = 0
+    local maxHealth = 0
+    pcall(function()
+        health = humanoid.Health
+        maxHealth = humanoid.MaxHealth
+    end)
+    
+    local healthPercentage = maxHealth > 0 and (health / maxHealth) or 0
+    local healthText = string.format("HP: %.0f/%.0f", health, maxHealth)
+    
+    espObject.Drawings.Health.Text = healthText
+    espObject.Drawings.Health.Position = Vector2.new(screenPosition.X, boxY - 5)
+    espObject.Drawings.Health.Visible = ESP.Settings.ShowHealth
+    espObject.Drawings.Health.Color = ESP.Settings.PlayerColor
+    
+    -- Update health bar
+    local healthBarWidth = width + 4
+    
+    espObject.Drawings.HealthBarBackground.From = Vector2.new(boxX - 2, boxY - 6)
+    espObject.Drawings.HealthBarBackground.To = Vector2.new(boxX + healthBarWidth - 2, boxY - 6)
+    espObject.Drawings.HealthBarBackground.Visible = ESP.Settings.ShowHealth
+    
+    local barLength = math.max(healthBarWidth * healthPercentage, 1)
+    espObject.Drawings.HealthBar.From = Vector2.new(boxX - 2, boxY - 6)
+    espObject.Drawings.HealthBar.To = Vector2.new(boxX - 2 + barLength, boxY - 6)
+    
+    -- Color the health bar based on health percentage
+    if healthPercentage > 0.6 then
+        espObject.Drawings.HealthBar.Color = Color3.fromRGB(0, 255, 0) -- Green
+    elseif healthPercentage > 0.3 then
+        espObject.Drawings.HealthBar.Color = Color3.fromRGB(255, 255, 0) -- Yellow
+    else
+        espObject.Drawings.HealthBar.Color = Color3.fromRGB(255, 0, 0) -- Red
+    end
+    
+    espObject.Drawings.HealthBar.Visible = ESP.Settings.ShowHealth
+    
+    -- Update level
+    local level = 0
+    pcall(function() level = getPlayerLevel(character) end)
+    
+    espObject.Drawings.Level.Text = "Level: " .. level
+    espObject.Drawings.Level.Position = Vector2.new(screenPosition.X, boxY + height + 15)
+    espObject.Drawings.Level.Visible = ESP.Settings.ShowLevel
+    espObject.Drawings.Level.Color = ESP.Settings.PlayerColor
+    
+    -- Update distance
+    espObject.Drawings.Distance.Text = string.format("%.0fm", distance)
+    espObject.Drawings.Distance.Position = Vector2.new(screenPosition.X, boxY + height)
+    espObject.Drawings.Distance.Visible = ESP.Settings.ShowDistance
+    espObject.Drawings.Distance.Color = ESP.Settings.PlayerColor
+end
+
+-- Update all ESP colors
+local function UpdateESPColors()
+    for _, espObject in pairs(ESPObjects) do
+        pcall(function()
+            if espObject.Drawings.Box then
+                espObject.Drawings.Box.Color = ESP.Settings.PlayerColor
+            end
+            if espObject.Drawings.Name then
+                espObject.Drawings.Name.Color = ESP.Settings.PlayerColor
+            end
+            if espObject.Drawings.Health then
+                espObject.Drawings.Health.Color = ESP.Settings.PlayerColor
+            end
+            if espObject.Drawings.Distance then
+                espObject.Drawings.Distance.Color = ESP.Settings.PlayerColor
+            end
+            if espObject.Drawings.Level then
+                espObject.Drawings.Level.Color = ESP.Settings.PlayerColor
+            end
+        end)
+    end
+end
+
+-- Initialize ESP system
+local function InitializeESP()
+    -- Setup players
+    pcall(function()
+        for _, player in pairs(Players:GetPlayers()) do
+            if player and player ~= LocalPlayer then
+                pcall(function() CreateESPObject(player) end)
+            end
+        end
+        
+        Players.PlayerAdded:Connect(function(player)
+            if player and player ~= LocalPlayer then
+                pcall(function() CreateESPObject(player) end)
+            end
+        end)
+        
+        Players.PlayerRemoving:Connect(function(player)
+            pcall(function() RemoveESPObject(player) end)
+        end)
+    end)
+    
+    -- Update ESP objects every frame
+    pcall(function()
+        RunService:BindToRenderStep("ESP", 200, function()
+            pcall(function()
+                for player, espObject in pairs(ESPObjects) do
+                    if player then
+                        pcall(function() UpdateESP(player) end)
+                    end
+                end
+            end)
+        end)
+    end)
+end
+
+-- ESP Module Functions
+function ESPModule.SetupESP(ESPCategory, Window)
+    -- Create ESP Button and Sections
+    local ESPButton = ESPCategory:Button("ESP Options", "http://www.roblox.com/asset/?id=8395621517")
+    local ESPSectionLeft = ESPButton:Section("ESP Features", "Left")
+    local ESPSectionRight = ESPButton:Section("ESP Settings", "Right")
+    
+    -- Main ESP Toggle
+    ESPSectionLeft:Toggle({
+        Title = "ESP Enabled",
+        Description = "Enable/Disable ESP system",
+        Default = false
+    }, function(value)
+        ESP.Enabled = value
+        if value then
+            Window:Notification({
+                Title = "ESP",
+                Description = "ESP system enabled!"
+            })
+        else
+            Window:Notification({
+                Title = "ESP", 
+                Description = "ESP system disabled!"
+            })
+        end
+    end)
+    
+    -- Show Boxes Toggle
+    ESPSectionLeft:Toggle({
+        Title = "Show Boxes",
+        Description = "Display player boxes",
+        Default = true
+    }, function(value)
+        ESP.Settings.ShowBoxes = value
+    end)
+    
+    -- Show Names Toggle
+    ESPSectionLeft:Toggle({
+        Title = "Show Names",
+        Description = "Display player names",
+        Default = true
+    }, function(value)
+        ESP.Settings.ShowNames = value
+    end)
+    
+    -- Show Health Toggle
+    ESPSectionLeft:Toggle({
+        Title = "Show Health",
+        Description = "Display player health",
+        Default = true
+    }, function(value)
+        ESP.Settings.ShowHealth = value
+    end)
+    
+    -- Show Distance Toggle
+    ESPSectionLeft:Toggle({
+        Title = "Show Distance",
+        Description = "Display distance to players",
+        Default = true
+    }, function(value)
+        ESP.Settings.ShowDistance = value
+    end)
+    
+    -- Show Level Toggle
+    ESPSectionLeft:Toggle({
+        Title = "Show Level",
+        Description = "Display player levels",
+        Default = true
+    }, function(value)
+        ESP.Settings.ShowLevel = value
+    end)
+    
+    -- Team Check Toggle
+    ESPSectionLeft:Toggle({
+        Title = "Team Check",
+        Description = "Hide teammates (Guild members)",
+        Default = false
+    }, function(value)
+        ESP.Settings.TeamCheck = value
+    end)
+    
+    -- Max Distance Slider
+    ESPSectionRight:Slider({
+        Title = "Max Distance",
+        Description = "Maximum ESP render distance",
+        Default = 2000,
+        Min = 500,
+        Max = 5000
+    }, function(value)
+        ESP.Settings.MaxDistance = value
+    end)
+    
+    -- Box Width Slider
+    ESPSectionRight:Slider({
+        Title = "Box Width",
+        Description = "Width of ESP boxes",
+        Default = 4,
+        Min = 1,
+        Max = 10
+    }, function(value)
+        ESP.Settings.BoxWidth = value
+    end)
+    
+    -- Box Height Slider  
+    ESPSectionRight:Slider({
+        Title = "Box Height",
+        Description = "Height of ESP boxes",
+        Default = 6,
+        Min = 1,
+        Max = 15
+    }, function(value)
+        ESP.Settings.BoxHeight = value
+    end)
+    
+    -- Player Color Picker
+    ESPSectionRight:ColorPicker({
+        Title = "Player Color",
+        Description = "Color for ESP elements",
+        Default = Color3.fromRGB(255, 0, 0)
+    }, function(color)
+        ESP.Settings.PlayerColor = color
+        UpdateESPColors()
+    end)
+    
+    -- Clear ESP Button
+    ESPSectionRight:Button({
+        Title = "Clear ESP",
+        ButtonName = "Clear",
+        Description = "Remove all ESP objects"
+    }, function()
+        for player, espObject in pairs(ESPObjects) do
+            RemoveESPObject(player)
+        end
+        Window:Notification({
+            Title = "ESP",
+            Description = "All ESP objects cleared!"
+        })
+    end)
+    
+    -- Initialize the ESP system
+    InitializeESP()
+    
+    -- Return ESP controls for external access
+    return {
+        ToggleESP = function(enabled)
+            ESP.Enabled = enabled
+        end,
+        SetPlayerColor = function(color)
+            ESP.Settings.PlayerColor = color
+            UpdateESPColors()
+        end,
+        SetMaxDistance = function(distance)
+            ESP.Settings.MaxDistance = distance
+        end,
+        GetSettings = function()
+            return {
+                Enabled = ESP.Enabled,
+                Settings = ESP.Settings
+            }
+        end,
+        RemoveAll = function()
+            for player, espObject in pairs(ESPObjects) do
+                RemoveESPObject(player)
+            end
+        end
+    }
+end
+
+return ESPModule
